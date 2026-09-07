@@ -7,37 +7,37 @@ import (
 )
 
 type TaskRepository interface {
-	SaveTask(task *domain.Task) error
-	GetTask(id string) (*domain.Task, error)
-	UpdateTaskStatus(id string, status domain.TaskStatus) error
-	SaveTaskResult(id string, result *domain.Result) error
+	SaveTask(ctx context.Context, task *domain.Task) error
+	GetTask(ctx context.Context, id string) (*domain.Task, error)
+	UpdateTaskStatus(ctx context.Context, id string, status domain.TaskStatus) error
+	SaveTaskResult(ctx context.Context, id string, result *domain.Result) error
 }
 
 type TaskService interface {
 	Submit(ctx context.Context, userID string, sub domain.Submission) (string, error)
-	Status(userID, id string) (domain.TaskStatus, error)
-	Result(userID, id string) (*domain.Result, error)
+	Status(ctx context.Context, userID, id string) (domain.TaskStatus, error)
+	Result(ctx context.Context, userID, id string) (*domain.Result, error)
 }
 
 type UserRepository interface {
-	SaveUser(user *domain.User) error
-	GetUserByID(id string) (*domain.User, error)
-	GetUserByLogin(login string) (*domain.User, error)
+	SaveUser(ctx context.Context, user *domain.User) error
+	GetUserByID(ctx context.Context, id string) (*domain.User, error)
+	GetUserByLogin(ctx context.Context, login string) (*domain.User, error)
 }
 
 type UserService interface {
-	Register(login, password string) error
-	Login(login, password string) (string, error)
+	Register(ctx context.Context, login, password string) error
+	Login(ctx context.Context, login, password string) (string, error)
 }
 
 type SessionRepository interface {
-	CreateSession(session *domain.Session) error
-	GetSession(sessionID string) (*domain.Session, error)
-	DeleteSession(sessionID string) error
+	CreateSession(ctx context.Context, session *domain.Session) error
+	GetSession(ctx context.Context, sessionID string) (*domain.Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
 }
 
 type AuthService interface {
-	Authenticate(token string) (string, error)
+	Authenticate(ctx context.Context, token string) (string, error)
 }
 
 type CodeExecutor interface {
