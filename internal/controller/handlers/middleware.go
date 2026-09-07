@@ -36,7 +36,7 @@ func AuthMiddleware(auth port.AuthService) func(http.Handler) http.Handler {
 				return
 			}
 
-			userID, err := auth.Authenticate(token)
+			userID, err := auth.Authenticate(r.Context(), token)
 			if err != nil {
 				unauthorizedResponseHelper(w, "invalid or expired session")
 				return

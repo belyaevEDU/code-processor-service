@@ -51,6 +51,17 @@ const docTemplate = `{
                 },
                 "type": "object"
             },
+            "handlers.taskCreateRequest": {
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "translator": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "handlers.taskCreateResponse": {
                 "properties": {
                     "task_id": {
@@ -396,15 +407,26 @@ const docTemplate = `{
         },
         "/task": {
             "post": {
-                "description": "Creating a task owned by an authenticated user",
+                "description": "Creating a task owned by an authenticated user and queuing it for execution",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
-                                "type": "object"
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/handlers.taskCreateRequest",
+                                        "summary": "request",
+                                        "description": "task submission"
+                                    }
+                                ]
                             }
                         }
-                    }
+                    },
+                    "description": "task submission",
+                    "required": true
                 },
                 "responses": {
                     "201": {

@@ -1,0 +1,13 @@
+# sql-migrate CLI config
+
+development:
+  dialect: postgres
+  datasource: ${DATABASE_URL}
+  dir: migrations
+  table: gorp_migrations
+
+production:
+  dialect: postgres
+  datasource: ${DATABASE_URL}
+  dir: migrations
+  table: gorp_migrations

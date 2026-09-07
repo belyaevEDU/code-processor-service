@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -23,6 +24,11 @@ func NewTaskHandlers(taskSvc port.TaskService) *TaskHandlers {
 }
 
 // POST /task
+type taskCreateRequest struct {
+	Translator string `json:"translator"`
+	Code       string `json:"code"`
+}
+
 type taskCreateResponse struct {
 	TaskID string `json:"task_id"`
 }
@@ -38,10 +44,11 @@ type taskResultResponse struct {
 }
 
 // @Summary Create a task
-// @Description Creating a task owned by an authenticated user
+// @Description Creating a task owned by an authenticated user and queuing it for execution
 // @Tags task
 // @Accept json
 // @Produce json
+// @Param request body taskCreateRequest true "task submission"
 // @Success 201 {object} taskCreateResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
@@ -55,8 +62,23 @@ func (h *TaskHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := h.taskSvc.Submit(userID)
+	var req taskCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+		return
+	}
+
+	submission := domain.Submission{
+		Translator: req.Translator,
+		Code:       req.Code,
+	}
+
+	id, err := h.taskSvc.Submit(r.Context(), userID, submission)
 	if err != nil {
+		if errors.Is(err, domain.ErrUnsupportedTranslator) || errors.Is(err, domain.ErrInvalidSubmission) {
+			WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
 		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -84,7 +106,7 @@ func (h *TaskHandlers) Status(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "task_id")
 
-	status, err := h.taskSvc.Status(userID, id)
+	status, err := h.taskSvc.Status(r.Context(), userID, id)
 	if err != nil {
 		writeTaskError(w, err)
 		return
@@ -113,7 +135,7 @@ func (h *TaskHandlers) Result(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "task_id")
 
-	result, err := h.taskSvc.Result(userID, id)
+	result, err := h.taskSvc.Result(r.Context(), userID, id)
 	if err != nil {
 		writeTaskError(w, err)
 		return

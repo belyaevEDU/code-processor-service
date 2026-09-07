@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: vet & lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.3
+
+  publish-sandbox:
+    name: publish sandbox image to ghcr
+    # push to main only basically
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - id: repo
+        name: lowercase repo name by ghcr requirement
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: sandbox/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}/sandbox:latest
+            ghcr.io/${{ steps.repo.outputs.name }}/sandbox:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  e2e:
+    name: e2e (compose + philharmonic + pytest)
+    runs-on: ubuntu-latest
+    needs: lint
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/remote_code?sslmode=disable
+      REDIS_ADDR: localhost:6379
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+      PHILHARMONIC_URL: http://localhost:5555
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: infra
+        run: docker compose up -d --wait postgres redis rabbitmq
+
+      - name: build sandbox image
+        run: docker build -t sandbox:latest -f sandbox/Dockerfile .
+
+      - name: start philharmonic manager + worker on the runner
+        run: |
+          git clone --depth 1 --branch v0.1.1 https://github.com/belyaevedu/philharmonic /tmp/philharmonic
+          (cd /tmp/philharmonic && CGO_ENABLED=0 go build -o /tmp/phrm .)
+
+          /tmp/phrm manager --host 127.0.0.1 --port 5555 --workers 127.0.0.1:5556 > /tmp/phrm-manager.log 2>&1 &
+          /tmp/phrm worker --host 127.0.0.1 --port 5556 --name dev-worker > /tmp/phrm-worker.log 2>&1 &
+
+          # wait until the manager reads the worker's stats
+          for i in $(seq 1 30); do
+            curl -sf localhost:5555/nodes | grep -q '"Cores":[1-9]' && break
+            sleep 1
+          done
+          curl -sf localhost:5555/nodes | grep -q '"Cores":[1-9]'
+
+      - name: build & run server and processor
+        run: |
+          go build -o /tmp/server ./cmd/server
+          go build -o /tmp/processor ./cmd/processor
+          /tmp/server > /tmp/server.log 2>&1 &
+          METRICS_ADDR=:9101 /tmp/processor > /tmp/processor.log 2>&1 &
+          # any HTTP answer (even 401/404) means the server is serving.
+          # it only serves after the migrations are done
+          curl -s -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors \
+            localhost:8000/status/00000000-0000-0000-0000-000000000000
+
+      - name: pytest
+        run: |
+          python -m pip install pytest requests
+          python -m pytest tests/hw2.py tests/hw3.py -v
+
+      - name: debug logs
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail 30 postgres redis rabbitmq || true
+          for f in /tmp/server.log /tmp/processor.log /tmp/phrm-manager.log /tmp/phrm-worker.log; do
+            if [ -f "$f" ]; then echo "== $f =="; tail -n 50 "$f"; fi
+          done
+
+      - name: teardown
+        if: always()
+        run: docker compose down -v

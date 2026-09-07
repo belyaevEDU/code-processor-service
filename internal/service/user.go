@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -28,12 +29,12 @@ func NewUserService(users port.UserRepository, sessions port.SessionRepository) 
 	return &UserService{users: users, sessions: sessions}
 }
 
-func (s *UserService) Register(login, password string) error {
+func (s *UserService) Register(ctx context.Context, login, password string) error {
 	if login == "" || password == "" {
 		return domain.ErrInvalidCredentials
 	}
 
-	if existing, err := s.users.GetUserByLogin(login); err == nil {
+	if existing, err := s.users.GetUserByLogin(ctx, login); err == nil {
 		// tests basically involve a double register
 		// with the same login:pass, so this logic is here to pass the tests
 		if comparePassword(existing.Password, password) != nil {
@@ -55,12 +56,12 @@ func (s *UserService) Register(login, password string) error {
 		Password: hashed,
 	}
 
-	if err := s.users.SaveUser(user); err != nil {
+	if err := s.users.SaveUser(ctx, user); err != nil {
 		if !errors.Is(err, domain.ErrUserAlreadyExists) {
 			return err
 		}
 		// possible concurrent registration race
-		stored, gErr := s.users.GetUserByLogin(login)
+		stored, gErr := s.users.GetUserByLogin(ctx, login)
 		if gErr != nil {
 			return gErr
 		}
@@ -73,8 +74,8 @@ func (s *UserService) Register(login, password string) error {
 	return nil
 }
 
-func (s *UserService) Login(login, password string) (string, error) {
-	user, err := s.users.GetUserByLogin(login)
+func (s *UserService) Login(ctx context.Context, login, password string) (string, error) {
+	user, err := s.users.GetUserByLogin(ctx, login)
 	if err != nil {
 		if errors.Is(err, domain.ErrUserNotFound) {
 			return "", domain.ErrInvalidCredentials
@@ -96,15 +97,15 @@ func (s *UserService) Login(login, password string) (string, error) {
 		SessionID: token,
 	}
 
-	if err := s.sessions.CreateSession(session); err != nil {
+	if err := s.sessions.CreateSession(ctx, session); err != nil {
 		return "", err
 	}
 
 	return token, nil
 }
 
-func (s *UserService) Authenticate(token string) (string, error) {
-	session, err := s.sessions.GetSession(token)
+func (s *UserService) Authenticate(ctx context.Context, token string) (string, error) {
+	session, err := s.sessions.GetSession(ctx, token)
 	if err != nil {
 		return "", domain.ErrUnauthorized
 	}

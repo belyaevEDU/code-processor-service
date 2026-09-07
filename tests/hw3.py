@@ -54,10 +54,8 @@ def test_create_task(auth_token):
     task_url = f"{BASE_URL}/task"
     headers = {'Authorization': f'Bearer {auth_token}'}
 
-    payload = dict()
-    # payload = get_code_processor_payload()
+    payload = get_code_processor_payload()
     # payload = get_image_processor_payload()
-
 
     if len(payload) == 0:
         raise NotImplemented("Choose one of the variants for payload!")

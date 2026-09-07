@@ -9,7 +9,9 @@ import (
 	"github.com/belyaevedu/remote-code-service/internal/config"
 	"github.com/belyaevedu/remote-code-service/internal/controller"
 	"github.com/belyaevedu/remote-code-service/internal/controller/handlers"
-	"github.com/belyaevedu/remote-code-service/internal/repository"
+	"github.com/belyaevedu/remote-code-service/internal/repository/postgres"
+	"github.com/belyaevedu/remote-code-service/internal/repository/queue"
+	"github.com/belyaevedu/remote-code-service/internal/repository/redis"
 	"github.com/belyaevedu/remote-code-service/internal/service"
 )
 
@@ -29,24 +31,72 @@ import (
 //
 // @securitydefinitions.bearerauth BearerAuth
 func main() {
-	cfg, err := config.Load()
+	appCfg, err := config.LoadAppConfig()
 	if err != nil {
-		log.Fatalf("invalid config: %v", err)
+		log.Fatalf("invalid app config: %v", err)
+	}
+	dbCfg, err := config.LoadDBConfig()
+	if err != nil {
+		log.Fatalf("invalid db config: %v", err)
+	}
+	redisCfg, err := config.LoadRedisConfig()
+	if err != nil {
+		log.Fatalf("invalid redis config: %v", err)
+	}
+	queueCfg, err := config.LoadQueueConfig()
+	if err != nil {
+		log.Fatalf("invalid queue config: %v", err)
+	}
+	metricsCfg, err := config.LoadMetricsConfig()
+	if err != nil {
+		log.Fatalf("invalid metrics config: %v", err)
 	}
 
-	repo := repository.New()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	taskService := service.NewTaskService(repo, cfg.ProcessingTime)
-	userService := service.NewUserService(repo, repo)
+	if err := postgres.Migrate(ctx, dbCfg); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
+	db, err := postgres.New(ctx, dbCfg)
+	if err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
+	defer db.Close()
+
+	sessions, err := redis.New(ctx, redisCfg)
+	if err != nil {
+		log.Fatalf("redis: %v", err)
+	}
+	defer func() {
+		if err := sessions.Close(); err != nil {
+			log.Printf("closing redis: %v", err)
+		}
+	}()
+
+	publisher := queue.NewPublisher(queueCfg)
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			log.Printf("closing queue publisher: %v", err)
+		}
+	}()
+
+	taskService := service.NewTaskService(db, publisher)
+	userService := service.NewUserService(db, sessions)
 
 	taskHandler := handlers.NewTaskHandlers(taskService)
 	userHandler := handlers.NewUserHandlers(userService)
 
 	router := controller.NewRouter(taskHandler, userHandler, userService)
-	server := controller.NewApi(cfg.HTTPAddr, router, cfg.ShutdownTimeout)
+	server := controller.NewApi(appCfg.HTTPAddr, router, appCfg.ShutdownTimeout)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	metricsServer := controller.NewMetricsServer(metricsCfg.Addr, metricsCfg.ShutdownTimeout)
+	go func() {
+		if err := metricsServer.Start(ctx); err != nil {
+			log.Fatalf("metrics server exited with error: %v", err)
+		}
+	}()
 
 	if err := server.Start(ctx); err != nil {
 		log.Fatalf("server exited with error: %v", err)

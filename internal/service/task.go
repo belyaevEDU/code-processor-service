@@ -1,8 +1,8 @@
 package service
 
 import (
-	"log"
-	"time"
+	"context"
+	"fmt"
 
 	"github.com/belyaevedu/remote-code-service/internal/domain"
 	"github.com/belyaevedu/remote-code-service/internal/port"
@@ -10,61 +10,67 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	outputMessage = "puk"
-)
-
 type TaskService struct {
-	repo           port.TaskRepository
-	processingTime time.Duration
+	repo      port.TaskRepository
+	publisher port.TaskPublisher
 }
 
-// compile-time assert that task's TaskService struct
-// implements port's TaskService interface
 var _ port.TaskService = (*TaskService)(nil)
 
-func NewTaskService(repo port.TaskRepository, processingTime time.Duration) *TaskService {
-	if processingTime <= 0 {
-		processingTime = 2 * time.Second
-	}
+func NewTaskService(repo port.TaskRepository, publisher port.TaskPublisher) *TaskService {
 	return &TaskService{
-		repo:           repo,
-		processingTime: processingTime,
+		repo:      repo,
+		publisher: publisher,
 	}
 }
 
-func (s *TaskService) Submit(userID string) (string, error) {
+func (s *TaskService) Submit(ctx context.Context, userID string, sub domain.Submission) (string, error) {
 	if userID == "" {
 		return "", domain.ErrAccessDenied
+	}
+	if _, ok := supportedTranslators[sub.Translator]; !ok {
+		return "", fmt.Errorf("%w: %q", domain.ErrUnsupportedTranslator, sub.Translator)
+	}
+	if sub.Code == "" {
+		return "", fmt.Errorf("%w: empty code", domain.ErrInvalidSubmission)
 	}
 
 	id := uuid.NewString()
 
 	task := &domain.Task{
-		ID:     id,
-		UserID: userID,
-		Status: domain.StatusInProgress,
+		ID:         id,
+		UserID:     userID,
+		Status:     domain.StatusInProgress,
+		Translator: sub.Translator,
 	}
 
-	if err := s.repo.Save(task); err != nil {
+	if err := s.repo.SaveTask(ctx, task); err != nil {
 		return "", err
 	}
 
-	go s.process(id)
+	msg := domain.TaskMessage{
+		TaskID:     id,
+		Translator: sub.Translator,
+		Code:       sub.Code,
+	}
+	if err := s.publisher.Publish(ctx, msg); err != nil {
+		// the row stays behind as in_progress evidence of the failure
+		return "", fmt.Errorf("queue publish: %w", err)
+	}
 
 	return id, nil
 }
 
-func (s *TaskService) Status(userID, id string) (domain.TaskStatus, error) {
-	t, err := s.getOwnedTask(userID, id)
+func (s *TaskService) Status(ctx context.Context, userID, id string) (domain.TaskStatus, error) {
+	t, err := s.getOwnedTask(ctx, userID, id)
 	if err != nil {
 		return "", err
 	}
 	return t.Status, nil
 }
 
-func (s *TaskService) Result(userID, id string) (*domain.Result, error) {
-	t, err := s.getOwnedTask(userID, id)
+func (s *TaskService) Result(ctx context.Context, userID, id string) (*domain.Result, error) {
+	t, err := s.getOwnedTask(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +82,12 @@ func (s *TaskService) Result(userID, id string) (*domain.Result, error) {
 
 // fetches the task by id and verifies it belongs to a set user
 // task owned by someone else results in ErrAccessDenied
-func (s *TaskService) getOwnedTask(userID, id string) (*domain.Task, error) {
+func (s *TaskService) getOwnedTask(ctx context.Context, userID, id string) (*domain.Task, error) {
 	if userID == "" {
 		return nil, domain.ErrAccessDenied
 	}
 
-	t, err := s.repo.Get(id)
+	t, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -91,18 +97,4 @@ func (s *TaskService) getOwnedTask(userID, id string) (*domain.Task, error) {
 	}
 
 	return t, nil
-}
-
-func (s *TaskService) process(id string) {
-	time.Sleep(s.processingTime)
-
-	result := &domain.Result{
-		Output: outputMessage,
-	}
-
-	if err := s.repo.SaveResult(id, result); err != nil {
-		log.Printf("Failed to save task result %s: %v\n", id, err)
-		return
-	}
-	log.Printf("Task finished: %s\n", id)
 }
