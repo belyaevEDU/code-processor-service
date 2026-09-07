@@ -52,7 +52,7 @@ func (h *UserHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.userSvc.Register(req.Username, req.Password); err != nil {
+	if err := h.userSvc.Register(r.Context(), req.Username, req.Password); err != nil {
 		if errors.Is(err, domain.ErrInvalidCredentials) {
 			WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 			return
@@ -87,7 +87,7 @@ func (h *UserHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.userSvc.Login(req.Username, req.Password)
+	token, err := h.userSvc.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCredentials) {
 			WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: err.Error()})

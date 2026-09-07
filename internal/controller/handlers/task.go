@@ -106,7 +106,7 @@ func (h *TaskHandlers) Status(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "task_id")
 
-	status, err := h.taskSvc.Status(userID, id)
+	status, err := h.taskSvc.Status(r.Context(), userID, id)
 	if err != nil {
 		writeTaskError(w, err)
 		return
@@ -135,7 +135,7 @@ func (h *TaskHandlers) Result(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "task_id")
 
-	result, err := h.taskSvc.Result(userID, id)
+	result, err := h.taskSvc.Result(r.Context(), userID, id)
 	if err != nil {
 		writeTaskError(w, err)
 		return
