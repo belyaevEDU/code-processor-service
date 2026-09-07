@@ -46,14 +46,14 @@ func (r *Repository) Close() error {
 	return r.client.Close()
 }
 
-func (r *Repository) CreateSession(session *domain.Session) error {
-	return r.client.Set(context.Background(),
+func (r *Repository) CreateSession(ctx context.Context, session *domain.Session) error {
+	return r.client.Set(ctx,
 		sessionKeyPrefix+session.SessionID, session.UserID, r.ttl,
 	).Err()
 }
 
-func (r *Repository) GetSession(sessionID string) (*domain.Session, error) {
-	userID, err := r.client.Get(context.Background(),
+func (r *Repository) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
+	userID, err := r.client.Get(ctx,
 		sessionKeyPrefix+sessionID,
 	).Result()
 	if errors.Is(err, redis.Nil) {
@@ -69,8 +69,8 @@ func (r *Repository) GetSession(sessionID string) (*domain.Session, error) {
 	}, nil
 }
 
-func (r *Repository) DeleteSession(sessionID string) error {
-	removed, err := r.client.Del(context.Background(),
+func (r *Repository) DeleteSession(ctx context.Context, sessionID string) error {
+	removed, err := r.client.Del(ctx,
 		sessionKeyPrefix+sessionID,
 	).Result()
 	if err != nil {
