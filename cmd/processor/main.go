@@ -75,7 +75,7 @@ func main() {
 			return fmt.Errorf("execute task %s: %w", msg.TaskID, err)
 		}
 
-		return db.SaveTaskResult(msg.TaskID, &domain.Result{Output: result.Output})
+		return db.SaveTaskResult(ctx, msg.TaskID, &domain.Result{Output: result.Output})
 	}
 
 	log.Printf("processor: consuming queue %q", queueCfg.Queue)
